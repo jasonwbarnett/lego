@@ -14,6 +14,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -357,22 +358,36 @@ func (c *Client) RenewCertificate(cert CertificateResource, bundle bool) (Certif
 // Then solves the challenges in series and returns.
 func (c *Client) solveChallenges(challenges []authorizationResource) map[string]error {
 	// loop through the resources, basically through the domains.
+
+	// Create WaitGroup for solvers
+	var wg sync.WaitGroup
+
 	failures := make(map[string]error)
 	for _, authz := range challenges {
 		// no solvers - no solving
 		if solvers := c.chooseSolvers(authz.Body, authz.Domain); solvers != nil {
-			for i, solver := range solvers {
+			for i, s := range solvers {
 				// TODO: do not immediately fail if one domain fails to validate.
-				err := solver.Solve(authz.Body.Challenges[i], authz.Domain)
-				if err != nil {
-					failures[authz.Domain] = err
-				}
+
+				// Increase the WaitGroup counter
+				wg.Add(1)
+
+				go func(authz authorizationResource, i int, s solver) {
+					// Defer the decrement of the WaitGroup counter
+					defer wg.Done()
+					s.Solve(authz.Body.Challenges[i], authz.Domain)
+				}(authz, i, s)
+
 			}
 		} else {
 			failures[authz.Domain] = fmt.Errorf("[%s] acme: Could not determine solvers", authz.Domain)
 		}
 	}
 
+	// Wait for all resolvers to finish before returning failures
+	wg.Wait()
+
+	// Finally return failures
 	return failures
 }
 
