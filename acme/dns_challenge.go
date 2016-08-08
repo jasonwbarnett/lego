@@ -38,7 +38,7 @@ func DNS01Record(domain, keyAuth string) (fqdn string, value string, ttl int) {
 	// base64URL encoding without padding
 	keyAuthSha := base64.URLEncoding.EncodeToString(keyAuthShaBytes[:sha256.Size])
 	value = strings.TrimRight(keyAuthSha, "=")
-	ttl = 120
+	ttl = 10
 	fqdn = fmt.Sprintf("_acme-challenge.%s.", domain)
 	return
 }

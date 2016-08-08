@@ -4,6 +4,7 @@ package googlecloud
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"strings"
 	"time"
@@ -15,6 +16,22 @@ import (
 
 	"google.golang.org/api/dns/v1"
 )
+
+var (
+	// Logger is an optional custom logger.
+	Logger         *log.Logger
+	checkFrequency = 5
+)
+
+// logf writes a log entry. It uses Logger if not
+// nil, otherwise it uses the default log.Logger.
+func logf(format string, args ...interface{}) {
+	if Logger != nil {
+		Logger.Printf(format, args...)
+	} else {
+		log.Printf(format, args...)
+	}
+}
 
 // DNSProvider is an implementation of the DNSProvider interface.
 type DNSProvider struct {
@@ -69,6 +86,7 @@ func (c *DNSProvider) Present(domain, token, keyAuth string) error {
 		Additions: []*dns.ResourceRecordSet{rec},
 	}
 
+	logf("[INFO][%s][googlecloud][%s] Creating TXT record", domain, fqdn)
 	chg, err := c.client.Changes.Create(c.project, zone, change).Do()
 	if err != nil {
 		return err
@@ -76,7 +94,8 @@ func (c *DNSProvider) Present(domain, token, keyAuth string) error {
 
 	// wait for change to be acknowledged
 	for chg.Status == "pending" {
-		time.Sleep(time.Second)
+		logf("[INFO][%s][googlecloud][%s] Change is pending still, will check again in %d seconds", domain, fqdn, checkFrequency)
+		time.Sleep(time.Duration(checkFrequency) * time.Second)
 
 		chg, err = c.client.Changes.Get(c.project, zone, chg.Id).Do()
 		if err != nil {
@@ -116,7 +135,7 @@ func (c *DNSProvider) CleanUp(domain, token, keyAuth string) error {
 // Timeout customizes the timeout values used by the ACME package for checking
 // DNS record validity.
 func (c *DNSProvider) Timeout() (timeout, interval time.Duration) {
-	return 180 * time.Second, 5 * time.Second
+	return 90 * time.Second, 2 * time.Second
 }
 
 // getHostedZone returns the managed-zone

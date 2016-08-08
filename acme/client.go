@@ -19,7 +19,8 @@ import (
 
 var (
 	// Logger is an optional custom logger.
-	Logger *log.Logger
+	Logger               *log.Logger
+	maxConcurrentSolvers = 20
 )
 
 // logf writes a log entry. It uses Logger if not
@@ -507,19 +508,33 @@ func (c *Client) RenewCertificate(cert CertificateResource, bundle bool) (Certif
 func (c *Client) solveChallenges(challenges []authorizationResource) map[string]error {
 	// loop through the resources, basically through the domains.
 	failures := make(map[string]error)
-	ch := make(chan domainError, len(challenges))
+	errorsChannel := make(chan domainError, len(challenges))
+	concurrentSolvers := make(chan authorizationResource, maxConcurrentSolvers)
+
 	for _, authz := range challenges {
 		go func(authz authorizationResource) {
+			// This ensures that we block the number of concurrent solvers running at
+			// once. This helps manage API flooding.
+			concurrentSolvers <- authz
+
 			err := c.solveChallenge(authz)
-			ch <- domainError{Domain: authz.Domain, Error: err}
+			errorsChannel <- domainError{Domain: authz.Domain, Error: err}
+
+			// When finished remove from the channel
+			_ = <-concurrentSolvers
 		}(authz)
 	}
+
+	// This for block ensures that we block here until ALL challenges have
+	// been solved.
 	for i := 0; i < len(challenges); i++ {
-		de := <-ch
+		de := <-errorsChannel
 		if de.Error != nil {
 			failures[de.Domain] = de.Error
 		}
 	}
+
+	// Finally return any and all failures
 	return failures
 }
 
